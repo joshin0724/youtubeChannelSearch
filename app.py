@@ -6,56 +6,89 @@ import datetime
 import isodate
 
 # -------------------------------------------------------------
-# 1. 유튜브 스타일 다크모드 및 기본 UI 디자인 세팅
+# 1. 화이트 모드 테마 및 모바일 버튼 중앙 정렬 커스텀 CSS 주입
 # -------------------------------------------------------------
 st.set_page_config(page_title="YouTube Channel Analyzer", layout="wide", page_icon="🔴")
 
 st.markdown("""
     <style>
-    /* 전체 배경 유튜브 다크모드화 */
+    /* 배경을 흰색으로, 텍스트를 검은색으로 변경 */
     .stApp {
-        background-color: #0F0F0F;
-        color: #F1F1F1;
+        background-color: #FFFFFF;
+        color: #0F0F0F;
     }
+    /* 입력창 및 셀렉트박스 화이트 테마 최적화 */
     div[data-baseweb="input"] {
-        background-color: #212121 !important;
-        border: 1px solid #3F3F3F !important;
+        background-color: #F9F9F9 !important;
+        border: 1px solid #CCCCCC !important;
         border-radius: 40px !important;
+        color: #0F0F0F !important;
     }
     div[data-baseweb="select"] {
-        background-color: #212121 !important;
+        background-color: #F9F9F9 !important;
+        border: 1px solid #CCCCCC !important;
         border-radius: 8px !important;
     }
+    /* 검색 버튼 스타일 및 PC/모바일 분기 처리 */
+    .stButton {
+        display: flex;
+        justify-content: flex-start;
+    }
     .stButton>button {
-        background-color: #CC0000 !important;
+        background-color: #FF0000 !important; /* 유튜브 레드로 강조 */
         color: white !important;
         border-radius: 20px !important;
         border: none !important;
         font-weight: bold;
-        padding: 0.5rem 2rem !important;
+        padding: 0.5rem 2.5rem !important;
+        width: auto;
     }
     .stButton>button:hover {
-        background-color: #FF0000 !important;
+        background-color: #CC0000 !important;
     }
+    
+    /* 모바일 환경(화면 폭 768px 이하)일 때 버튼 중앙 정렬 */
+    @media (max-width: 768px) {
+        .stButton {
+            justify-content: center !important;
+        }
+        .stButton>button {
+            width: 80% !important; /* 모바일에서는 터치하기 편하게 가로폭 확대 */
+        }
+    }
+
     .notice-text {
         font-size: 13px;
-        color: #FF8A8A;
+        color: #D32F2F;
         margin-top: 6px;
         display: block;
+        font-weight: 500;
     }
-    /* 카드 컴포넌트 커스텀 폰트 세팅 */
+    /* 화이트 테마용 카드 컴포넌트 디자인 */
     .v-title {
         font-size: 14px;
         font-weight: 600;
-        color: #F1F1F1;
         margin-top: 8px;
         margin-bottom: 4px;
         line-height: 1.4;
     }
+    .v-title a {
+        color: #0F0F0F !important; /* 제목 텍스트 검은색 */
+        text-decoration: none;
+    }
+    .v-title a:hover {
+        color: #FF0000 !important;
+    }
     .v-meta {
         font-size: 12px;
-        color: #AAA;
+        color: #606060 !important; /* 메타 데이터 어두운 회색 */
         line-height: 1.5;
+    }
+    /* 스트림릿 기본 테두리 상자 디자인 오버라이딩 */
+    div[data-testid="stContainer"] {
+        background-color: #F9F9F9 !important;
+        border: 1px solid #E5E5E5 !important;
+        border-radius: 12px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -186,15 +219,31 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
         if search_keyword and search_keyword.lower() not in title.lower():
             continue
             
+        # -------------------------------------------------------------
+        # 💥 [요구사항 2] 숏츠 필터링 로직 정밀화 연산부
+        # -------------------------------------------------------------
         duration_str = v_item['contentDetails']['duration']
         try:
             duration_secs = isodate.parse_duration(duration_str).total_seconds()
         except Exception:
             duration_secs = 0
         
-        if video_type_filter == "숏츠(Shorts)" and duration_secs > 60:
+        # 기본 시간 체크 + 세로형 숏츠 패턴을 탐지하기 위한 해상도 비율 검증 구조화
+        thumbnails_data = snippet.get('thumbnails', {})
+        is_shorts_by_thumb = False
+        
+        # 일부 숏츠 영상은 썸네일 해상도가 정방형에 가깝거나 세로 비중이 높음
+        if 'maxres' in thumbnails_data:
+            thumb_detail = thumbnails_data['maxres']
+            if thumb_detail.get('width', 16) / thumb_detail.get('height', 9) < 1.3:
+                is_shorts_by_thumb = True
+
+        # 최종 판정 알고리즘: 60초 이하이거나 세로형 썸네일 특징을 가진 경우 Shorts 그룹으로 분류
+        is_actually_shorts = (duration_secs > 0 and duration_secs <= 60) or is_shorts_by_thumb
+
+        if video_type_filter == "숏츠(Shorts)" and not is_actually_shorts:
             continue
-        if video_type_filter == "롱폼(일반 영상)" and duration_secs <= 60:
+        if video_type_filter == "롱폼(일반 영상)" and is_actually_shorts:
             continue
             
         stats = v_item.get('statistics', {})
@@ -204,7 +253,7 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
         view_count = int(stats.get('viewCount', 0))
         like_count = int(stats.get('likeCount', 0))
         
-        thumb_url = snippet['thumbnails'].get('high', {}).get('url', snippet['thumbnails'].get('default', {}).get('url', ''))
+        thumb_url = thumbnails_data.get('high', {}).get('url', thumbnails_data.get('default', {}).get('url', ''))
         
         video_info = {
             "title": title,
@@ -219,7 +268,7 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
     return filtered_videos
 
 # -------------------------------------------------------------
-# 3. Streamlit UI 렌더링 엔진 (버그 완전 수정 교정부)
+# 3. Streamlit UI 렌더링 엔진 (엔터 키 서브밋 연동 완료)
 # -------------------------------------------------------------
 def main():
     st.title("🔴 YouTube Channel Keyword Search")
@@ -236,14 +285,18 @@ def main():
         video_type = st.selectbox("영상 유형", ["롱폼(일반 영상)", "숏츠(Shorts)"])
         
     st.write("")
+    
+    # [요구사항 3] 엔터 키 및 실행 처리를 세션과 결합하여 유기적으로 작동하도록 설계
     search_button = st.button("검색 실행")
     
     st.markdown("<span class='notice-text'>※ 조회 결과는 최근 1년 이내 영상만 필터링되어 반영됩니다.</span>", unsafe_allow_html=True)
     st.write("")
     
-    if search_button:
+    # 버튼이 눌렸거나, 인풋창에서 엔터가 쳐져서 값이 채워진 경우 둘 다 반응형 엔진이 작동함
+    if search_button or (url_input and not search_button):
         if not url_input:
-            st.warning("⚠️ 분석할 유튜브 채널 URL을 입력해 주세요.")
+            if search_button: # 버튼을 눌렀는데 빈칸일 때만 경고 노출
+                st.warning("⚠️ 분석할 유튜브 채널 URL을 입력해 주세요.")
             return
             
         youtube = get_youtube_client()
@@ -270,19 +323,13 @@ def main():
             st.success(f"📊 총 {len(results)}개의 조건 매칭 비디오를 찾았습니다.")
             st.write("")
             
-            # 버그 해결책: Native st.columns 구조로 안전하게 분할 매핑 (한 줄에 4개 배치)
-            # 이 방식은 화면 크기가 작아지면(모바일) 자동으로 한 줄에 1개씩 떨어지는 반응형을 기본 지원합니다.
             cols = st.columns(4)
             for idx, video in enumerate(results):
                 col_idx = idx % 4
                 with cols[col_idx]:
-                    # 개별 카드 배치용 컨테이너 생성
                     with st.container(border=True):
-                        # 1. 썸네일 노출
                         st.image(video['thumbnail'], use_container_width=True)
-                        # 2. 제목 (클릭 시 링크 이동 하이퍼링크 결합)
-                        st.markdown(f"<div class='v-title'><a href='{video['url']}' target='_blank' style='text-decoration:none; color:#F1F1F1;'>{video['title']}</a></div>", unsafe_allow_html=True)
-                        # 3. 조회수 및 메타 데이터
+                        st.markdown(f"<div class='v-title'><a href='{video['url']}' target='_blank'>{video['title']}</a></div>", unsafe_allow_html=True)
                         st.markdown(f"""
                             <div class='v-meta'>
                                 조회수 {video['views']} • 좋아요 {video['likes']}<br>
