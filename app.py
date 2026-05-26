@@ -104,14 +104,13 @@ st.markdown("""
 # -------------------------------------------------------------
 def get_youtube_client():
     try:
-        api_key = st.secrets["YOUTUBE_API_KEY"].strip() # 공백 제거 안전장치
+        api_key = st.secrets["YOUTUBE_API_KEY"].strip()
         return build('youtube', 'v3', developerKey=api_key)
     except Exception:
         st.error("🔒 Streamlit Advanced Settings에 'YOUTUBE_API_KEY'가 설정되지 않았습니다.")
         return None
 
 def extract_channel_id_or_handle(url):
-    """URL 내부에서 @핸들네임 또는 고유 ID 문자열을 유연하게 추출합니다."""
     url = url.strip()
     if 'youtube.com' not in url and url.startswith('@'):
         return url
@@ -127,25 +126,21 @@ def extract_channel_id_or_handle(url):
     cleaned = url.split('/')[-1].split('?')[0]
     if cleaned.startswith('@'):
         return cleaned
-    return url # 원본 그대로 반환하여 차선책 탐색
+    return url
 
 def fetch_channel_internal_id(youtube, identity):
-    """HttpError 방지를 위한 다중 폴백(Fallback) 채널 ID 확보 인프라"""
     if identity.startswith('UC'):
         return identity
         
-    # 차선책 1: 구글 공식 핸들 검색 API 시도
     try:
-        # API 전송 전 패딩 제거
         handle_clean = identity.replace('@', '')
         response = youtube.channels().list(part='id', forHandle=handle_clean).execute()
         items = response.get('items', [])
         if items:
             return items[0]['id']
     except HttpError:
-        pass # 실패하면 다음 엔진으로 무시하고 토스
+        pass
         
-    # 차선책 2: 범용 검색(Search) 엔진 인터페이스 가동 (HttpError 회피 최적화)
     try:
         search_response = youtube.search().list(
             q=identity,
@@ -157,7 +152,7 @@ def fetch_channel_internal_id(youtube, identity):
         if search_items:
             return search_items[0]['id']['channelId']
     except HttpError as e:
-        st.error(f"❌ YouTube API 호출 한도가 초과되었거나 Key가 유효하지 않습니다. (상세 오차: {e})")
+        st.error(f"❌ YouTube API 호출 오류가 발생했습니다: {e}")
         return None
         
     return None
@@ -169,7 +164,7 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
             return []
         upload_playlist_id = ch_resp['items'][0]['contentDetails']['relatedPlaylists']['uploads']
     except HttpError as e:
-        st.error(f"❌ 채널 메타데이터 정보를 가져오는데 실패했습니다: {e}")
+        st.error(f"❌ 채널 정보를 가져오는데 실패했습니다: {e}")
         return []
     
     one_year_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=365)
@@ -177,6 +172,7 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
     next_page_token = None
     
     try:
+        # 최근 1년 이내 업로드 비디오 ID 수집 (최대 100개 제한 보장)
         for _ in range(2):
             playlist_resp = youtube.playlistItems().list(
                 part='snippet',
@@ -191,30 +187,46 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
                 
                 if pub_date < one_year_ago:
                     break
-                video_ids.append(item['snippet']['resourceId']['videoId'])
+                
+                v_id = item['snippet']['resourceId']['videoId']
+                if v_id and v_id not in video_ids:
+                    video_ids.append(v_id)
                 
             next_page_token = playlist_resp.get('nextPageToken')
             if not next_page_token or len(video_ids) >= 100:
                 break
     except HttpError as e:
-        st.error(f"❌ 영상 목록을 패치하는 중 오류가 발생했습니다: {e}")
+        st.error(f"❌ 영상 목록 패치 중 오류 발생: {e}")
         return []
             
     if not video_ids:
         return []
 
+    # -------------------------------------------------------------
+    # 💥 핵심 해결 해결책: 400 Invalid Filter Error 방지를 위한 ID 분할 조회
+    # -------------------------------------------------------------
+    video_items = []
+    chunk_size = 20 # 구글 안정 규격인 20개 단위로 슬라이싱 청크 처리
+    
     try:
-        video_resp = youtube.videos().list(
-            part='snippet,statistics,contentDetails',
-            id=','.join(video_ids)
-        ).execute()
+        for i in range(0, len(video_ids), chunk_size):
+            chunk_ids = video_ids[i:i + chunk_size]
+            if not chunk_ids:
+                continue
+                
+            video_resp = youtube.videos().list(
+                part='snippet,statistics,contentDetails',
+                id=','.join(chunk_ids)
+            ).execute()
+            
+            video_items.extend(video_resp.get('items', []))
     except HttpError as e:
-        st.error(f"❌ 영상 상세 데이터 검색 파이프라인 오류: {e}")
+        st.error(f"❌ 영상 상세 정보를 안전 영역에서 가져오지 못했습니다: {e}")
         return []
     
     filtered_videos = []
     
-    for v_item in video_resp.get('items', []):
+    for v_item in video_items:
         snippet = v_item['snippet']
         title = snippet['title']
         
@@ -222,7 +234,10 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
             continue
             
         duration_str = v_item['contentDetails']['duration']
-        duration_secs = isodate.parse_duration(duration_str).total_seconds()
+        try:
+            duration_secs = isodate.parse_duration(duration_str).total_seconds()
+        except Exception:
+            duration_secs = 0 # 파싱 예외 발생 시 디폴트 스케일링
         
         if video_type_filter == "숏츠(Shorts)" and duration_secs > 60:
             continue
@@ -236,7 +251,7 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
         view_count = int(stats.get('viewCount', 0))
         like_count = int(stats.get('likeCount', 0))
         
-        thumb_url = snippet['thumbnails'].get('high', {}).get('url', snippet['thumbnails']['default']['url'])
+        thumb_url = snippet['thumbnails'].get('high', {}).get('url', snippet['thumbnails'].get('default', {}).get('url', ''))
         
         video_info = {
             "title": title,
