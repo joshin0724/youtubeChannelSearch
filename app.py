@@ -6,9 +6,10 @@ import datetime
 import isodate
 
 # -------------------------------------------------------------
-# 1. 화이트 모드 테마 및 모바일 버튼 중앙 정렬 커스텀 CSS 주입
+# 1. 화이트 모드 테마 및 모바일 버튼/입력창 가로폭 매칭 커스텀 CSS 주입
 # -------------------------------------------------------------
-st.set_page_config(page_title="YouTube Channel Analyzer", layout="wide", page_icon="🔴")
+# [요구사항 2] 브라우저 탭 타이틀 한글화 반영
+st.set_page_config(page_title="유튜브 채널 검색", layout="wide", page_icon="🔴")
 
 st.markdown("""
     <style>
@@ -47,13 +48,14 @@ st.markdown("""
         background-color: #CC0000 !important;
     }
     
-    /* 모바일 환경(화면 폭 768px 이하)일 때 버튼 중앙 정렬 */
+    /* [요구사항 1] 모바일 환경(화면 폭 768px 이하)일 때 입력창들과 가로 폭 똑같게 일치 */
     @media (max-width: 768px) {
         .stButton {
-            justify-content: center !important;
+            width: 100% !important;
         }
         .stButton>button {
-            width: 80% !important; /* 모바일에서는 터치하기 편하게 가로폭 확대 */
+            width: 100% !important; /* 모바일 입력창들과 100% 똑같은 가로폭 일치 */
+            margin: 0 !important;
         }
     }
 
@@ -73,7 +75,7 @@ st.markdown("""
         line-height: 1.4;
     }
     .v-title a {
-        color: #0F0F0F !important; /* 제목 텍스트 검은색 */
+        color: #0F0F0F !important;
         text-decoration: none;
     }
     .v-title a:hover {
@@ -81,7 +83,7 @@ st.markdown("""
     }
     .v-meta {
         font-size: 12px;
-        color: #606060 !important; /* 메타 데이터 어두운 회색 */
+        color: #606060 !important;
         line-height: 1.5;
     }
     /* 스트림릿 기본 테두리 상자 디자인 오버라이딩 */
@@ -219,26 +221,20 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
         if search_keyword and search_keyword.lower() not in title.lower():
             continue
             
-        # -------------------------------------------------------------
-        # 💥 [요구사항 2] 숏츠 필터링 로직 정밀화 연산부
-        # -------------------------------------------------------------
         duration_str = v_item['contentDetails']['duration']
         try:
             duration_secs = isodate.parse_duration(duration_str).total_seconds()
         except Exception:
             duration_secs = 0
         
-        # 기본 시간 체크 + 세로형 숏츠 패턴을 탐지하기 위한 해상도 비율 검증 구조화
         thumbnails_data = snippet.get('thumbnails', {})
         is_shorts_by_thumb = False
         
-        # 일부 숏츠 영상은 썸네일 해상도가 정방형에 가깝거나 세로 비중이 높음
         if 'maxres' in thumbnails_data:
             thumb_detail = thumbnails_data['maxres']
             if thumb_detail.get('width', 16) / thumb_detail.get('height', 9) < 1.3:
                 is_shorts_by_thumb = True
 
-        # 최종 판정 알고리즘: 60초 이하이거나 세로형 썸네일 특징을 가진 경우 Shorts 그룹으로 분류
         is_actually_shorts = (duration_secs > 0 and duration_secs <= 60) or is_shorts_by_thumb
 
         if video_type_filter == "숏츠(Shorts)" and not is_actually_shorts:
@@ -268,10 +264,11 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
     return filtered_videos
 
 # -------------------------------------------------------------
-# 3. Streamlit UI 렌더링 엔진 (엔터 키 서브밋 연동 완료)
+# 3. Streamlit UI 렌더링 엔진
 # -------------------------------------------------------------
 def main():
-    st.title("🔴 YouTube Channel Keyword Search")
+    # [요구사항 2] 메인 타이틀 명칭 한글로 변경
+    st.title("🔴 유튜브 채널 검색")
     st.subheader("채널 내 유형별 맞춤 영상 검색 시스템")
     st.write("")
     
@@ -286,17 +283,13 @@ def main():
         
     st.write("")
     
-    # [요구사항 3] 엔터 키 및 실행 처리를 세션과 결합하여 유기적으로 작동하도록 설계
     search_button = st.button("검색 실행")
     
     st.markdown("<span class='notice-text'>※ 조회 결과는 최근 1년 이내 영상만 필터링되어 반영됩니다.</span>", unsafe_allow_html=True)
     st.write("")
     
-    # 버튼이 눌렸거나, 인풋창에서 엔터가 쳐져서 값이 채워진 경우 둘 다 반응형 엔진이 작동함
     if search_button or (url_input and not search_button):
         if not url_input:
-            if search_button: # 버튼을 눌렀는데 빈칸일 때만 경고 노출
-                st.warning("⚠️ 분석할 유튜브 채널 URL을 입력해 주세요.")
             return
             
         youtube = get_youtube_client()
