@@ -6,12 +6,13 @@ import datetime
 import isodate
 
 # -------------------------------------------------------------
-# 1. 유튜브 스타일 다크모드 및 모바일/PC 반응형 CSS 주입
+# 1. 유튜브 스타일 다크모드 및 기본 UI 디자인 세팅
 # -------------------------------------------------------------
 st.set_page_config(page_title="YouTube Channel Analyzer", layout="wide", page_icon="🔴")
 
 st.markdown("""
     <style>
+    /* 전체 배경 유튜브 다크모드화 */
     .stApp {
         background-color: #0F0F0F;
         color: #F1F1F1;
@@ -32,69 +33,29 @@ st.markdown("""
         border: none !important;
         font-weight: bold;
         padding: 0.5rem 2rem !important;
-        width: 100%;
     }
     .stButton>button:hover {
         background-color: #FF0000 !important;
-    }
-    
-    .video-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        justify-content: flex-start;
-    }
-    .video-card-wrapper {
-        flex: 1 1 calc(25% - 16px);
-        min-width: 250px;
-        max-width: 100%;
-        box-sizing: border-box;
-    }
-    @media (max-width: 768px) {
-        .video-card-wrapper {
-            flex: 1 1 calc(50% - 16px);
-        }
-    }
-    @media (max-width: 480px) {
-        .video-card-wrapper {
-            flex: 1 1 100%;
-        }
-    }
-
-    .video-card {
-        background-color: #1F1F1F;
-        border-radius: 12px;
-        padding: 0px;
-        height: 100%;
-        overflow: hidden;
-        transition: transform 0.2s;
-        border: 1px solid #2F2F2F;
-    }
-    .video-card:hover {
-        transform: scale(1.02);
-    }
-    .video-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: #F1F1F1;
-        margin: 10px 8px 5px 8px;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        line-height: 1.4;
-    }
-    .video-meta {
-        font-size: 12px;
-        color: #AAA;
-        margin: 0px 8px 12px 8px;
-        line-height: 1.5;
     }
     .notice-text {
         font-size: 13px;
         color: #FF8A8A;
         margin-top: 6px;
         display: block;
+    }
+    /* 카드 컴포넌트 커스텀 폰트 세팅 */
+    .v-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #F1F1F1;
+        margin-top: 8px;
+        margin-bottom: 4px;
+        line-height: 1.4;
+    }
+    .v-meta {
+        font-size: 12px;
+        color: #AAA;
+        line-height: 1.5;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -172,7 +133,6 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
     next_page_token = None
     
     try:
-        # 최근 1년 이내 업로드 비디오 ID 수집 (최대 100개 제한 보장)
         for _ in range(2):
             playlist_resp = youtube.playlistItems().list(
                 part='snippet',
@@ -202,26 +162,19 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
     if not video_ids:
         return []
 
-    # -------------------------------------------------------------
-    # 💥 핵심 해결 해결책: 400 Invalid Filter Error 방지를 위한 ID 분할 조회
-    # -------------------------------------------------------------
     video_items = []
-    chunk_size = 20 # 구글 안정 규격인 20개 단위로 슬라이싱 청크 처리
+    chunk_size = 20
     
     try:
         for i in range(0, len(video_ids), chunk_size):
             chunk_ids = video_ids[i:i + chunk_size]
-            if not chunk_ids:
-                continue
-                
             video_resp = youtube.videos().list(
                 part='snippet,statistics,contentDetails',
                 id=','.join(chunk_ids)
             ).execute()
-            
             video_items.extend(video_resp.get('items', []))
     except HttpError as e:
-        st.error(f"❌ 영상 상세 정보를 안전 영역에서 가져오지 못했습니다: {e}")
+        st.error(f"❌ 영상 상세 정보를 가져오지 못했습니다: {e}")
         return []
     
     filtered_videos = []
@@ -237,7 +190,7 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
         try:
             duration_secs = isodate.parse_duration(duration_str).total_seconds()
         except Exception:
-            duration_secs = 0 # 파싱 예외 발생 시 디폴트 스케일링
+            duration_secs = 0
         
         if video_type_filter == "숏츠(Shorts)" and duration_secs > 60:
             continue
@@ -266,7 +219,7 @@ def get_channel_videos(youtube, channel_id, video_type_filter, search_keyword):
     return filtered_videos
 
 # -------------------------------------------------------------
-# 3. Streamlit UI 렌더링 엔진
+# 3. Streamlit UI 렌더링 엔진 (버그 완전 수정 교정부)
 # -------------------------------------------------------------
 def main():
     st.title("🔴 YouTube Channel Keyword Search")
@@ -317,25 +270,25 @@ def main():
             st.success(f"📊 총 {len(results)}개의 조건 매칭 비디오를 찾았습니다.")
             st.write("")
             
-            grid_html = "<div class='video-grid'>"
-            for video in results:
-                grid_html += f"""
-                    <div class='video-card-wrapper'>
-                        <a href="{video['url']}" target="_blank" style="text-decoration: none;">
-                            <div class="video-card">
-                                <div style="width:100%; aspect-ratio: 16/9; background-image: url('{video['thumbnail']}'); background-size: cover; background-position: center; border-radius:12px 12px 0 0;"></div>
-                                <div class="video-title">{video['title']}</div>
-                                <div class="video-meta">
-                                    조회수 {video['views']} • 좋아요 {video['likes']}<br>
-                                    업로드일: {video['date']}
-                                </div>
+            # 버그 해결책: Native st.columns 구조로 안전하게 분할 매핑 (한 줄에 4개 배치)
+            # 이 방식은 화면 크기가 작아지면(모바일) 자동으로 한 줄에 1개씩 떨어지는 반응형을 기본 지원합니다.
+            cols = st.columns(4)
+            for idx, video in enumerate(results):
+                col_idx = idx % 4
+                with cols[col_idx]:
+                    # 개별 카드 배치용 컨테이너 생성
+                    with st.container(border=True):
+                        # 1. 썸네일 노출
+                        st.image(video['thumbnail'], use_container_width=True)
+                        # 2. 제목 (클릭 시 링크 이동 하이퍼링크 결합)
+                        st.markdown(f"<div class='v-title'><a href='{video['url']}' target='_blank' style='text-decoration:none; color:#F1F1F1;'>{video['title']}</a></div>", unsafe_allow_html=True)
+                        # 3. 조회수 및 메타 데이터
+                        st.markdown(f"""
+                            <div class='v-meta'>
+                                조회수 {video['views']} • 좋아요 {video['likes']}<br>
+                                <b>업로드일:</b> {video['date']}
                             </div>
-                        </a>
-                    </div>
-                """
-            grid_html += "</div>"
-            
-            st.markdown(grid_html, unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
